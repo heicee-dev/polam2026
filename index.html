@@ -1,0 +1,818 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+<title>Polam Apartment — 3D Walkthrough</title>
+<style>
+  :root {
+    --ink: #1a1714;
+    --paper: #f3efe8;
+    --accent: #2f5d50;
+    --accent-soft: #7a9e92;
+    --warm: #c4a574;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body {
+    width: 100%; height: 100%; overflow: hidden;
+    background: #0d0c0b;
+    font-family: "Segoe UI", "Helvetica Neue", sans-serif;
+    color: var(--paper);
+    touch-action: none;
+    user-select: none;
+  }
+  #c { display: block; width: 100%; height: 100%; }
+  #overlay {
+    position: fixed; inset: 0; z-index: 20;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    background:
+      radial-gradient(ellipse at 30% 20%, rgba(47,93,80,0.35), transparent 55%),
+      radial-gradient(ellipse at 80% 80%, rgba(196,165,116,0.2), transparent 50%),
+      linear-gradient(165deg, #1a1714 0%, #0d0c0b 100%);
+    text-align: center; padding: 2rem;
+    transition: opacity 0.5s ease, visibility 0.5s;
+  }
+  #overlay.hidden { opacity: 0; visibility: hidden; pointer-events: none; }
+  #overlay h1 {
+    font-family: Georgia, "Times New Roman", serif;
+    font-size: clamp(2rem, 6vw, 3.4rem);
+    font-weight: 400; letter-spacing: 0.04em;
+    margin-bottom: 0.4rem;
+  }
+  #overlay p { opacity: 0.75; max-width: 28rem; line-height: 1.5; margin-bottom: 1.6rem; font-size: 0.95rem; }
+  #overlay .hint { font-size: 0.8rem; opacity: 0.55; margin-top: 1rem; }
+  #startBtn {
+    appearance: none; border: 1px solid var(--accent-soft);
+    background: var(--accent); color: var(--paper);
+    padding: 0.85rem 2rem; font-size: 1rem; letter-spacing: 0.08em;
+    cursor: pointer; border-radius: 2px;
+    transition: background 0.2s, transform 0.15s;
+  }
+  #startBtn:hover { background: #3a7262; transform: translateY(-1px); }
+  #hud {
+    position: fixed; inset: 0; z-index: 10; pointer-events: none;
+    display: none;
+  }
+  #hud.active { display: block; }
+  #crosshair {
+    position: absolute; top: 50%; left: 50%;
+    width: 14px; height: 14px; margin: -7px 0 0 -7px;
+    border: 1.5px solid rgba(243,239,232,0.55);
+    border-radius: 50%;
+  }
+  #crosshair::after {
+    content: ""; position: absolute; top: 50%; left: 50%;
+    width: 3px; height: 3px; margin: -1.5px 0 0 -1.5px;
+    background: rgba(243,239,232,0.8); border-radius: 50%;
+  }
+  #roomLabel {
+    position: absolute; top: 1.25rem; left: 50%; transform: translateX(-50%);
+    background: rgba(26,23,20,0.55); backdrop-filter: blur(6px);
+    padding: 0.4rem 1rem; border-radius: 2px;
+    font-size: 0.85rem; letter-spacing: 0.12em; text-transform: uppercase;
+    border: 1px solid rgba(243,239,232,0.12);
+  }
+  #controlsHint {
+    position: absolute; bottom: 1.25rem; left: 50%; transform: translateX(-50%);
+    font-size: 0.75rem; opacity: 0.55; white-space: nowrap;
+  }
+  #minimap {
+    position: absolute; top: 1rem; right: 1rem;
+    width: 160px; height: 140px;
+    background: rgba(26,23,20,0.7); border: 1px solid rgba(243,239,232,0.15);
+    border-radius: 3px; overflow: hidden;
+  }
+  #minimap canvas { width: 100%; height: 100%; display: block; }
+  #joysticks {
+    position: absolute; inset: 0; pointer-events: none; display: none;
+  }
+  #joysticks.visible { display: block; }
+  .joy {
+    position: absolute; bottom: 2rem; width: 110px; height: 110px;
+    border-radius: 50%; background: rgba(243,239,232,0.08);
+    border: 1.5px solid rgba(243,239,232,0.22);
+    pointer-events: auto; touch-action: none;
+  }
+  #joyMove { left: 1.5rem; }
+  #joyLook { right: 1.5rem; }
+  .joy-knob {
+    position: absolute; width: 44px; height: 44px; border-radius: 50%;
+    background: rgba(243,239,232,0.35); border: 1px solid rgba(243,239,232,0.4);
+    top: 50%; left: 50%; margin: -22px 0 0 -22px;
+    pointer-events: none;
+  }
+  @media (max-width: 700px) {
+    #controlsHint { display: none; }
+    #minimap { width: 120px; height: 105px; top: 0.6rem; right: 0.6rem; }
+  }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+
+<div id="overlay">
+  <h1>Polam</h1>
+  <p>First-person walkthrough of the apartment floor plan. Explore living, kitchen, bathroom, and both bedrooms.</p>
+  <button id="startBtn" type="button">Enter Apartment</button>
+  <p class="hint">Desktop: click to lock pointer · WASD move · mouse look · Shift sprint<br/>Mobile: dual touch joysticks</p>
+</div>
+
+<div id="hud">
+  <div id="crosshair"></div>
+  <div id="roomLabel">Entrance</div>
+  <div id="minimap"><canvas id="mm" width="160" height="140"></canvas></div>
+  <div id="controlsHint">WASD · Mouse look · Shift sprint · Esc release</div>
+  <div id="joysticks">
+    <div class="joy" id="joyMove"><div class="joy-knob" id="knobMove"></div></div>
+    <div class="joy" id="joyLook"><div class="joy-knob" id="knobLook"></div></div>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+(function () {
+  "use strict";
+
+  // ── Units: 1 = 1 meter ──────────────────────────────────────────────
+  // Approximate Polam apartment footprint (~8.6 × 6.4 m)
+  // Bedroom2 south wall: 0.357 + 0.750 door + 2.525 = 3.632 m
+
+  var WALL_H = 2.7;
+  var DOOR_W = 0.9;
+  var DOOR_H = 2.1;
+  var PLAYER_R = 0.28;
+  var EYE = 1.65;
+  var WALK = 2.8;
+  var SPRINT = 4.6;
+
+  // Floor bounds (XZ)
+  var BOUNDS = { minX: 0, maxX: 8.6, minZ: 0, maxZ: 6.4 };
+
+  /*
+    Layout (top-down, +X east, +Z south):
+
+         X=0                          X=8.6
+    Z=0  ┌──────────┬────────┬────────────┐
+         │ Kitchen  │  Bath  │  Bedroom1  │
+         │  (NW)    │ (N-C)  │   (NE)     │
+         ├──────────┤        ├────────────┤
+         │          │ Hall   │            │
+         │ Living   │        │  Bedroom2  │
+         │  (SW)    │ Entr→  │   (SE)     │
+         │          │ (East) │            │
+    Z=6.4└──────────┴────────┴────────────┘
+  */
+
+  var rooms = [
+    { name: "Kitchen",   minX: 0,   maxX: 3.2, minZ: 0,   maxZ: 2.6, color: 0xe8dcc8 },
+    { name: "Bathroom",  minX: 3.2, maxX: 5.0, minZ: 0,   maxZ: 2.4, color: 0xd4e4e8 },
+    { name: "Bedroom 1", minX: 5.0, maxX: 8.6, minZ: 0,   maxZ: 2.9, color: 0xe2d6c8 },
+    { name: "Living",    minX: 0,   maxX: 3.2, minZ: 2.6, maxZ: 6.4, color: 0xddd4c4 },
+    { name: "Hallway",   minX: 3.2, maxX: 5.0, minZ: 2.4, maxZ: 5.2, color: 0xe8e2d6 },
+    { name: "Entrance",  minX: 3.2, maxX: 5.0, minZ: 5.2, maxZ: 6.4, color: 0xe0d8cc },
+    { name: "Bedroom 2", minX: 5.0, maxX: 8.6, minZ: 2.9, maxZ: 6.4, color: 0xe6dcd0 }
+  ];
+
+  // Collision walls as AABBs (thin boxes). Gaps = door openings.
+  var colliders = [];
+
+  function addCollider(minX, maxX, minZ, maxZ) {
+    colliders.push({ minX: minX, maxX: maxX, minZ: minZ, maxZ: maxZ });
+  }
+
+  // Outer walls (with east entrance opening)
+  addCollider(-0.15, 0.05, 0, 6.4);           // west
+  addCollider(0, 8.6, -0.15, 0.05);           // north
+  addCollider(0, 8.6, 6.35, 6.55);            // south
+  // east wall split around entrance door at z~5.55
+  addCollider(8.55, 8.75, 0, 5.15);           // east north of door
+  addCollider(8.55, 8.75, 6.05, 6.4);         // east south of door
+
+  // Interior walls
+  // Kitchen / Living divider at z=2.6, x=0..3.2 with door near hall
+  addCollider(0, 2.2, 2.55, 2.65);            // kitchen-living wall (door on east end)
+  // Living / Hall at x=3.2, z=2.6..6.4 with door into living
+  addCollider(3.15, 3.25, 2.6, 4.0);          // living-hall north segment
+  addCollider(3.15, 3.25, 4.9, 6.4);          // living-hall south (door at 4.0-4.9)
+  // Kitchen / Bath at x=3.2, z=0..2.6
+  addCollider(3.15, 3.25, 0, 1.5);            // (door into bath at 1.5-2.4)
+  // Bath south wall at z=2.4, x=3.2..5.0 with door into hall
+  addCollider(3.2, 3.85, 2.35, 2.45);
+  addCollider(4.75, 5.0, 2.35, 2.45);          // door 3.85-4.75
+  // Bath / Bedroom1 at x=5.0, z=0..2.4
+  addCollider(4.95, 5.05, 0, 2.4);
+  // Bedroom1 / Bedroom2 at z=2.9, x=5.0..8.6 with door
+  // Bedroom2 wall: 0.357 + 0.750 door + 2.525  (from west)
+  addCollider(5.0, 5.0 + 0.357, 2.85, 2.95);
+  // door gap: 0.750 wide starting at 5.357
+  addCollider(5.0 + 0.357 + 0.750, 8.6, 2.85, 2.95); // 2.525m segment + remainder
+  // Hall / Bedroom2 at x=5.0, z=2.9..6.4 with door into bedroom2
+  addCollider(4.95, 5.05, 2.9, 4.2);
+  addCollider(4.95, 5.05, 5.1, 6.4);           // door 4.2-5.1
+  // Hall / Bedroom1 north extension already covered
+  // Entrance / Hall soft divider none — open
+  // Hall east into bedrooms covered
+
+  // Furniture colliders
+  function furnBox(cx, cz, w, d) {
+    addCollider(cx - w / 2, cx + w / 2, cz - d / 2, cz + d / 2);
+  }
+
+  // ── Three.js setup ─────────────────────────────────────────────────
+  var canvas = document.getElementById("c");
+  var renderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: true });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  renderer.outputEncoding = THREE.sRGBEncoding;
+
+  var scene = new THREE.Scene();
+  scene.background = new THREE.Color(0xb8c4c0);
+  scene.fog = new THREE.Fog(0xb8c4c0, 8, 22);
+
+  var camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.05, 50);
+  // Start at entrance (east), looking west into apartment
+  var player = {
+    x: 7.9, y: EYE, z: 5.6,
+    yaw: Math.PI,   // facing -X (into apartment)
+    pitch: 0
+  };
+  camera.position.set(player.x, player.y, player.z);
+
+  // Lights
+  var hemi = new THREE.HemisphereLight(0xfff5e8, 0x5a6a62, 0.55);
+  scene.add(hemi);
+  var amb = new THREE.AmbientLight(0xffffff, 0.25);
+  scene.add(amb);
+
+  var sun = new THREE.DirectionalLight(0xfff0dd, 0.85);
+  sun.position.set(4, 8, 2);
+  sun.castShadow = true;
+  sun.shadow.mapSize.set(2048, 2048);
+  sun.shadow.camera.near = 0.5;
+  sun.shadow.camera.far = 25;
+  sun.shadow.camera.left = -10;
+  sun.shadow.camera.right = 10;
+  sun.shadow.camera.top = 10;
+  sun.shadow.camera.bottom = -10;
+  scene.add(sun);
+
+  // Point lights per room for warmth
+  function roomLight(x, z, color, intensity) {
+    var L = new THREE.PointLight(color, intensity, 5, 2);
+    L.position.set(x, 2.4, z);
+    scene.add(L);
+  }
+  roomLight(1.6, 4.5, 0xffe8cc, 0.45); // living
+  roomLight(1.5, 1.2, 0xfff5e0, 0.4);  // kitchen
+  roomLight(4.1, 1.1, 0xe8f0ff, 0.35); // bath
+  roomLight(6.8, 1.4, 0xffe8d0, 0.4);  // bed1
+  roomLight(6.8, 4.6, 0xffe8d0, 0.4);  // bed2
+  roomLight(4.1, 3.8, 0xfff5e8, 0.3);  // hall
+
+  // ── Materials ──────────────────────────────────────────────────────
+  var matWall = new THREE.MeshStandardMaterial({ color: 0xf2ebe0, roughness: 0.92, metalness: 0.02 });
+  var matTrim = new THREE.MeshStandardMaterial({ color: 0xd9cfc0, roughness: 0.7, metalness: 0.05 });
+  var matFloorBase = new THREE.MeshStandardMaterial({ color: 0xc9b79a, roughness: 0.65, metalness: 0.05 });
+  var matCeiling = new THREE.MeshStandardMaterial({ color: 0xf7f3ec, roughness: 1, metalness: 0 });
+  var matWood = new THREE.MeshStandardMaterial({ color: 0x8b6914, roughness: 0.55, metalness: 0.08 });
+  var matWoodDark = new THREE.MeshStandardMaterial({ color: 0x5c4030, roughness: 0.6, metalness: 0.05 });
+  var matFabric = new THREE.MeshStandardMaterial({ color: 0x5a6e68, roughness: 0.95, metalness: 0 });
+  var matFabricLight = new THREE.MeshStandardMaterial({ color: 0xa8b5a0, roughness: 0.9, metalness: 0 });
+  var matMetal = new THREE.MeshStandardMaterial({ color: 0x9aa0a4, roughness: 0.35, metalness: 0.7 });
+  var matChrome = new THREE.MeshStandardMaterial({ color: 0xc8cdd0, roughness: 0.2, metalness: 0.9 });
+  var matBlack = new THREE.MeshStandardMaterial({ color: 0x222222, roughness: 0.4, metalness: 0.3 });
+  var matWhite = new THREE.MeshStandardMaterial({ color: 0xf5f5f5, roughness: 0.5, metalness: 0.1 });
+  var matTile = new THREE.MeshStandardMaterial({ color: 0xdce6e8, roughness: 0.3, metalness: 0.1 });
+  var matGlass = new THREE.MeshStandardMaterial({ color: 0xa8c8d8, roughness: 0.1, metalness: 0.2, transparent: true, opacity: 0.35 });
+  var matScreen = new THREE.MeshStandardMaterial({ color: 0x111418, roughness: 0.3, metalness: 0.5, emissive: 0x1a3040, emissiveIntensity: 0.4 });
+  var matMatte = new THREE.MeshStandardMaterial({ color: 0xe8e0d4, roughness: 0.85, metalness: 0 });
+  var matCounter = new THREE.MeshStandardMaterial({ color: 0x3d4540, roughness: 0.4, metalness: 0.15 });
+
+  function box(w, h, d, mat, x, y, z, cast, receive) {
+    var m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
+    m.position.set(x, y, z);
+    m.castShadow = cast !== false;
+    m.receiveShadow = receive !== false;
+    scene.add(m);
+    return m;
+  }
+
+  function cyl(rTop, rBot, h, mat, x, y, z, segs) {
+    var m = new THREE.Mesh(new THREE.CylinderGeometry(rTop, rBot, h, segs || 16), mat);
+    m.position.set(x, y, z);
+    m.castShadow = true;
+    m.receiveShadow = true;
+    scene.add(m);
+    return m;
+  }
+
+  // ── Build structure ────────────────────────────────────────────────
+  // Floor
+  var floor = box(8.6, 0.08, 6.4, matFloorBase, 4.3, -0.04, 3.2, false, true);
+
+  // Ceiling
+  box(8.6, 0.06, 6.4, matCeiling, 4.3, WALL_H + 0.03, 3.2, false, false);
+
+  // Room floor color accents (thin overlays)
+  rooms.forEach(function (r) {
+    var mat = new THREE.MeshStandardMaterial({
+      color: r.color, roughness: 0.7, metalness: 0.04
+    });
+    if (r.name === "Bathroom") mat = matTile;
+    var w = r.maxX - r.minX;
+    var d = r.maxZ - r.minZ;
+    box(w - 0.04, 0.02, d - 0.04, mat, (r.minX + r.maxX) / 2, 0.01, (r.minZ + r.maxZ) / 2, false, true);
+  });
+
+  // Wall mesh helper (visual + matches colliders roughly)
+  function wallSeg(x1, z1, x2, z2, h, y0) {
+    h = h || WALL_H;
+    y0 = y0 || 0;
+    var dx = x2 - x1, dz = z2 - z1;
+    var len = Math.sqrt(dx * dx + dz * dz);
+    if (len < 0.01) return;
+    var thick = 0.12;
+    var m = box(len, h, thick, matWall, (x1 + x2) / 2, y0 + h / 2, (z1 + z2) / 2);
+    m.rotation.y = Math.atan2(dz, dx);
+    return m;
+  }
+
+  function doorGapWall(ax, az, bx, bz, gapStart, gapEnd) {
+    // Horizontal or vertical wall with a door gap along the long axis
+    var horiz = Math.abs(bz - az) < 0.01;
+    if (horiz) {
+      var x0 = Math.min(ax, bx), x1 = Math.max(ax, bx);
+      var z = az;
+      if (gapStart > x0) wallSeg(x0, z, gapStart, z);
+      if (gapEnd < x1) wallSeg(gapEnd, z, x1, z);
+      // lintel above door
+      wallSeg(gapStart, z, gapEnd, z, WALL_H - DOOR_H, DOOR_H);
+    } else {
+      var z0 = Math.min(az, bz), z1 = Math.max(az, bz);
+      var x = ax;
+      if (gapStart > z0) wallSeg(x, z0, x, gapStart);
+      if (gapEnd < z1) wallSeg(x, gapEnd, x, z1);
+      wallSeg(x, gapStart, x, gapEnd, WALL_H - DOOR_H, DOOR_H);
+    }
+  }
+
+  // Outer walls
+  wallSeg(0, 0, 0, 6.4);
+  wallSeg(0, 0, 8.6, 0);
+  wallSeg(0, 6.4, 8.6, 6.4);
+  doorGapWall(8.6, 0, 8.6, 6.4, 5.15, 6.05); // east entrance
+
+  // Interior
+  doorGapWall(0, 2.6, 3.2, 2.6, 2.2, 3.1);           // kitchen-living
+  doorGapWall(3.2, 2.6, 3.2, 6.4, 4.0, 4.9);           // living-hall
+  doorGapWall(3.2, 0, 3.2, 2.6, 1.5, 2.4);             // kitchen-bath / hall north
+  doorGapWall(3.2, 2.4, 5.0, 2.4, 3.85, 4.75);          // bath south
+  wallSeg(5.0, 0, 5.0, 2.4);                            // bath-bed1
+  // Bedroom1 / Bedroom2: 357mm wall + 750mm door + 2525mm wall
+  doorGapWall(5.0, 2.9, 8.6, 2.9, 5.0 + 0.357, 5.0 + 0.357 + 0.750);
+  doorGapWall(5.0, 2.9, 5.0, 6.4, 4.2, 5.1);            // hall-bed2
+
+  // Baseboards
+  function baseboard(x1, z1, x2, z2) {
+    var dx = x2 - x1, dz = z2 - z1;
+    var len = Math.sqrt(dx * dx + dz * dz);
+    var m = box(len, 0.08, 0.04, matTrim, (x1 + x2) / 2, 0.04, (z1 + z2) / 2, false, true);
+    m.rotation.y = Math.atan2(dz, dx);
+  }
+  baseboard(0.06, 0.06, 8.54, 0.06);
+  baseboard(0.06, 6.34, 8.54, 6.34);
+
+  // ── Furniture ──────────────────────────────────────────────────────
+
+  // Entrance shoe rack (east, near door)
+  box(0.35, 0.55, 1.0, matWood, 8.2, 0.275, 5.55);
+  box(0.32, 0.02, 0.96, matWoodDark, 8.2, 0.18, 5.55);
+  box(0.32, 0.02, 0.96, matWoodDark, 8.2, 0.38, 5.55);
+  furnBox(8.2, 5.55, 0.4, 1.05);
+  // Coat hooks strip
+  box(0.04, 0.08, 0.6, matMetal, 8.45, 1.5, 4.7);
+
+  // Living: sofa against west wall, TV on east side of living (facing sofa)
+  // Sofa
+  box(0.9, 0.42, 2.2, matFabric, 0.7, 0.21, 4.5);       // seat
+  box(0.25, 0.55, 2.2, matFabric, 0.32, 0.55, 4.5);      // back
+  box(0.9, 0.35, 0.2, matFabricLight, 0.7, 0.55, 3.5);   // arm
+  box(0.9, 0.35, 0.2, matFabricLight, 0.7, 0.55, 5.5);   // arm
+  furnBox(0.6, 4.5, 1.1, 2.4);
+  // Coffee table
+  box(0.7, 0.05, 1.1, matWood, 1.7, 0.35, 4.5);
+  cyl(0.04, 0.04, 0.35, matMetal, 1.45, 0.175, 4.1);
+  cyl(0.04, 0.04, 0.35, matMetal, 1.95, 0.175, 4.1);
+  cyl(0.04, 0.04, 0.35, matMetal, 1.45, 0.175, 4.9);
+  cyl(0.04, 0.04, 0.35, matMetal, 1.95, 0.175, 4.9);
+  furnBox(1.7, 4.5, 0.75, 1.15);
+  // TV stand + TV (east wall of living, looking west toward sofa)
+  box(0.4, 0.45, 1.4, matWoodDark, 2.85, 0.225, 4.5);
+  box(0.06, 0.7, 1.2, matScreen, 2.68, 0.95, 4.5);
+  box(0.08, 0.08, 1.25, matBlack, 2.68, 0.58, 4.5);
+  furnBox(2.85, 4.5, 0.5, 1.5);
+  // Rug hint
+  box(1.8, 0.015, 2.4, new THREE.MeshStandardMaterial({ color: 0x6b5a48, roughness: 1 }), 1.5, 0.02, 4.5, false, true);
+
+  // Kitchen: counters along north and west, stove + sink
+  // North counter
+  box(2.6, 0.9, 0.6, matWhite, 1.4, 0.45, 0.4);
+  box(2.6, 0.04, 0.62, matCounter, 1.4, 0.92, 0.4);
+  furnBox(1.4, 0.4, 2.7, 0.7);
+  // West counter return
+  box(0.6, 0.9, 1.4, matWhite, 0.4, 0.45, 1.4);
+  box(0.62, 0.04, 1.4, matCounter, 0.4, 0.92, 1.4);
+  furnBox(0.4, 1.4, 0.7, 1.5);
+  // Sink
+  box(0.5, 0.12, 0.4, matChrome, 0.95, 0.88, 0.4);
+  cyl(0.02, 0.02, 0.25, matChrome, 0.95, 1.05, 0.25);
+  // Stove
+  box(0.55, 0.04, 0.55, matBlack, 2.2, 0.94, 0.4);
+  for (var si = 0; si < 4; si++) {
+    var sx = 2.05 + (si % 2) * 0.25;
+    var sz = 0.28 + Math.floor(si / 2) * 0.25;
+    cyl(0.08, 0.08, 0.02, matMetal, sx, 0.97, sz, 20);
+  }
+  // Upper cabinets
+  box(2.4, 0.7, 0.35, matWhite, 1.4, 2.1, 0.25);
+  // Fridge
+  box(0.65, 1.8, 0.65, matWhite, 2.85, 0.9, 1.8);
+  box(0.02, 0.5, 0.5, matMetal, 2.52, 1.3, 1.8);
+  furnBox(2.85, 1.8, 0.7, 0.7);
+  // Small table
+  box(0.8, 0.05, 0.8, matWood, 1.8, 0.72, 1.8);
+  cyl(0.05, 0.08, 0.7, matWoodDark, 1.8, 0.35, 1.8);
+  furnBox(1.8, 1.8, 0.9, 0.9);
+
+  // Bathroom: toilet + shower
+  // Toilet
+  box(0.4, 0.4, 0.55, matWhite, 3.55, 0.2, 0.55);
+  box(0.38, 0.35, 0.2, matWhite, 3.55, 0.55, 0.35);
+  cyl(0.18, 0.2, 0.15, matWhite, 3.55, 0.42, 0.7, 16);
+  furnBox(3.55, 0.55, 0.5, 0.7);
+  // Sink vanity
+  box(0.5, 0.7, 0.4, matWhite, 4.5, 0.35, 0.35);
+  box(0.45, 0.08, 0.35, matChrome, 4.5, 0.72, 0.35);
+  furnBox(4.5, 0.35, 0.55, 0.5);
+  // Shower enclosure (SE corner of bath)
+  box(0.9, 2.0, 0.04, matGlass, 4.55, 1.0, 1.95);
+  box(0.04, 2.0, 0.9, matGlass, 4.1, 1.0, 1.55);
+  box(0.88, 0.02, 0.88, matTile, 4.55, 0.02, 1.55);
+  // Shower head
+  cyl(0.08, 0.02, 0.06, matChrome, 4.7, 2.0, 1.3);
+  furnBox(4.55, 1.55, 0.95, 0.95);
+  // Mirror
+  box(0.5, 0.6, 0.02, matGlass, 4.5, 1.5, 0.08);
+
+  // Bedroom 1 (NE): bed, desk, wardrobe
+  // Bed against north wall
+  box(1.6, 0.35, 2.0, matWood, 6.9, 0.2, 1.2);
+  box(1.55, 0.2, 1.9, matFabricLight, 6.9, 0.45, 1.2);
+  box(0.5, 0.15, 0.35, matFabric, 6.5, 0.6, 0.45);  // pillow
+  box(0.5, 0.15, 0.35, matFabric, 7.3, 0.6, 0.45);
+  furnBox(6.9, 1.2, 1.7, 2.1);
+  // Desk against east wall
+  box(0.55, 0.05, 1.1, matWood, 8.15, 0.75, 2.2);
+  box(0.5, 0.7, 0.05, matWoodDark, 8.15, 0.35, 1.7);
+  box(0.5, 0.7, 0.05, matWoodDark, 8.15, 0.35, 2.7);
+  box(0.45, 0.35, 0.3, matBlack, 8.1, 0.95, 2.2); // laptop
+  furnBox(8.15, 2.2, 0.6, 1.2);
+  // Wardrobe west side of room
+  box(0.55, 2.1, 1.2, matWoodDark, 5.4, 1.05, 1.0);
+  box(0.02, 1.8, 0.55, matMetal, 5.68, 1.1, 0.75);
+  box(0.02, 1.8, 0.55, matMetal, 5.68, 1.1, 1.25);
+  furnBox(5.4, 1.0, 0.6, 1.3);
+  // Nightstand
+  box(0.4, 0.45, 0.4, matWood, 5.85, 0.225, 0.4);
+  furnBox(5.85, 0.4, 0.45, 0.45);
+
+  // Bedroom 2 (SE): bed, desk, wardrobe — wall 357+750door+2525
+  // Bed against south wall
+  box(1.6, 0.35, 2.0, matWood, 7.0, 0.2, 5.3);
+  box(1.55, 0.2, 1.9, matFabric, 7.0, 0.45, 5.3);
+  box(0.5, 0.15, 0.35, matFabricLight, 6.6, 0.6, 6.05);
+  box(0.5, 0.15, 0.35, matFabricLight, 7.4, 0.6, 6.05);
+  furnBox(7.0, 5.3, 1.7, 2.1);
+  // Desk east
+  box(0.55, 0.05, 1.0, matWood, 8.15, 0.75, 3.8);
+  box(0.5, 0.7, 0.05, matWoodDark, 8.15, 0.35, 3.4);
+  box(0.5, 0.7, 0.05, matWoodDark, 8.15, 0.35, 4.2);
+  furnBox(8.15, 3.8, 0.6, 1.1);
+  // Wardrobe near door / west
+  box(0.55, 2.1, 1.0, matWoodDark, 5.45, 1.05, 3.5);
+  furnBox(5.45, 3.5, 0.6, 1.1);
+  // Chair
+  box(0.4, 0.05, 0.4, matWood, 7.5, 0.45, 3.8);
+  box(0.05, 0.45, 0.05, matWoodDark, 7.35, 0.225, 3.65);
+  box(0.05, 0.45, 0.05, matWoodDark, 7.65, 0.225, 3.65);
+  box(0.05, 0.45, 0.05, matWoodDark, 7.35, 0.225, 3.95);
+  box(0.05, 0.45, 0.05, matWoodDark, 7.65, 0.225, 3.95);
+  box(0.4, 0.4, 0.05, matFabric, 7.5, 0.65, 3.62);
+
+  // Hall runner
+  box(1.4, 0.015, 2.4, new THREE.MeshStandardMaterial({ color: 0x7a6550, roughness: 1 }), 4.1, 0.02, 3.7, false, true);
+
+  // Windows (recessed emissive panels on outer walls)
+  function windowPane(x, y, z, w, h, rotY) {
+    var frame = box(w + 0.08, h + 0.08, 0.06, matTrim, x, y, z, false, true);
+    frame.rotation.y = rotY || 0;
+    var pane = new THREE.Mesh(
+      new THREE.PlaneGeometry(w, h),
+      new THREE.MeshStandardMaterial({
+        color: 0xc5d8e8, emissive: 0x88aacc, emissiveIntensity: 0.55,
+        roughness: 0.2, metalness: 0.1, side: THREE.DoubleSide
+      })
+    );
+    pane.position.set(x, y, z);
+    pane.rotation.y = rotY || 0;
+    // nudge inward
+    var nx = Math.sin(rotY || 0) * 0.04;
+    var nz = Math.cos(rotY || 0) * 0.04;
+    pane.position.x -= nx;
+    pane.position.z -= nz;
+    scene.add(pane);
+  }
+  windowPane(1.5, 1.5, 0.07, 1.4, 1.2, 0);          // kitchen N
+  windowPane(6.8, 1.5, 0.07, 1.6, 1.2, 0);          // bed1 N
+  windowPane(1.5, 1.5, 6.33, 1.6, 1.2, Math.PI);    // living S
+  windowPane(7.0, 1.5, 6.33, 1.4, 1.2, Math.PI);    // bed2 S
+
+  // Door leafs (open-ish, decorative)
+  function doorLeaf(x, z, rotY) {
+    var d = box(0.04, DOOR_H - 0.05, DOOR_W - 0.05, matWood, x, (DOOR_H - 0.05) / 2, z);
+    d.rotation.y = rotY;
+  }
+  doorLeaf(3.15, 4.45, 0.4);   // living
+  doorLeaf(4.3, 2.4, 0.5);     // bath
+  doorLeaf(5.0 + 0.357 + 0.35, 2.9, -0.3); // bed1-bed2
+  doorLeaf(5.0, 4.65, -0.5);   // bed2 from hall
+
+  // Floating room labels (sprites)
+  var labelSprites = [];
+  function makeLabel(text, x, z) {
+    var c = document.createElement("canvas");
+    c.width = 256; c.height = 64;
+    var ctx = c.getContext("2d");
+    ctx.clearRect(0, 0, 256, 64);
+    ctx.fillStyle = "rgba(26,23,20,0.55)";
+    roundRect(ctx, 16, 12, 224, 40, 4);
+    ctx.fill();
+    ctx.font = "600 22px Georgia, serif";
+    ctx.fillStyle = "#f3efe8";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(text, 128, 34);
+    var tex = new THREE.CanvasTexture(c);
+    var mat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false, opacity: 0.85 });
+    var spr = new THREE.Sprite(mat);
+    spr.position.set(x, 2.35, z);
+    spr.scale.set(1.6, 0.4, 1);
+    scene.add(spr);
+    labelSprites.push(spr);
+  }
+  function roundRect(ctx, x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+  }
+  makeLabel("Kitchen", 1.5, 1.2);
+  makeLabel("Living", 1.5, 4.5);
+  makeLabel("Bathroom", 4.1, 1.1);
+  makeLabel("Bedroom 1", 6.8, 1.4);
+  makeLabel("Bedroom 2", 6.8, 4.6);
+  makeLabel("Entrance", 4.1, 5.8);
+
+  // ── Collision ──────────────────────────────────────────────────────
+  function collides(nx, nz) {
+    var r = PLAYER_R;
+    // keep inside outer bounds
+    if (nx - r < 0.08 || nx + r > 8.52 || nz - r < 0.08 || nz + r > 6.32) return true;
+    for (var i = 0; i < colliders.length; i++) {
+      var b = colliders[i];
+      if (nx + r > b.minX && nx - r < b.maxX && nz + r > b.minZ && nz - r < b.maxZ) return true;
+    }
+    return false;
+  }
+
+  function tryMove(dx, dz) {
+    var nx = player.x + dx;
+    var nz = player.z + dz;
+    if (!collides(nx, nz)) {
+      player.x = nx; player.z = nz;
+      return;
+    }
+    // slide
+    if (!collides(player.x + dx, player.z)) player.x += dx;
+    if (!collides(player.x, player.z + dz)) player.z += dz;
+  }
+
+  function currentRoom() {
+    for (var i = 0; i < rooms.length; i++) {
+      var r = rooms[i];
+      if (player.x >= r.minX && player.x <= r.maxX && player.z >= r.minZ && player.z <= r.maxZ) return r.name;
+    }
+    return "Apartment";
+  }
+
+  // ── Input ──────────────────────────────────────────────────────────
+  var keys = {};
+  var pointerLocked = false;
+  var isMobile = ("ontouchstart" in window) || navigator.maxTouchPoints > 0;
+  var moveJoy = { x: 0, y: 0, active: false };
+  var lookJoy = { x: 0, y: 0, active: false };
+
+  var overlay = document.getElementById("overlay");
+  var startBtn = document.getElementById("startBtn");
+  var hud = document.getElementById("hud");
+  var roomLabelEl = document.getElementById("roomLabel");
+  var joysticks = document.getElementById("joysticks");
+
+  startBtn.addEventListener("click", function () {
+    overlay.classList.add("hidden");
+    hud.classList.add("active");
+    if (isMobile) {
+      joysticks.classList.add("visible");
+    } else {
+      canvas.requestPointerLock();
+    }
+  });
+
+  document.addEventListener("pointerlockchange", function () {
+    pointerLocked = document.pointerLockElement === canvas;
+  });
+
+  canvas.addEventListener("click", function () {
+    if (!overlay.classList.contains("hidden") || isMobile) return;
+    if (!pointerLocked) canvas.requestPointerLock();
+  });
+
+  document.addEventListener("mousemove", function (e) {
+    if (!pointerLocked) return;
+    player.yaw -= e.movementX * 0.0022;
+    player.pitch -= e.movementY * 0.0022;
+    player.pitch = Math.max(-1.2, Math.min(1.2, player.pitch));
+  });
+
+  document.addEventListener("keydown", function (e) {
+    keys[e.code] = true;
+    if (e.code === "Escape" && pointerLocked) document.exitPointerLock();
+  });
+  document.addEventListener("keyup", function (e) { keys[e.code] = false; });
+
+  // Touch joysticks
+  function bindJoy(el, knob, state) {
+    var tid = null;
+    function center() {
+      var r = el.getBoundingClientRect();
+      return { x: r.left + r.width / 2, y: r.top + r.height / 2, max: r.width * 0.35 };
+    }
+    function setKnob(dx, dy) {
+      knob.style.transform = "translate(" + dx + "px," + dy + "px)";
+    }
+    el.addEventListener("touchstart", function (e) {
+      e.preventDefault();
+      tid = e.changedTouches[0].identifier;
+      state.active = true;
+      update(e.changedTouches[0]);
+    }, { passive: false });
+    el.addEventListener("touchmove", function (e) {
+      e.preventDefault();
+      for (var i = 0; i < e.changedTouches.length; i++) {
+        if (e.changedTouches[i].identifier === tid) update(e.changedTouches[i]);
+      }
+    }, { passive: false });
+    function end(e) {
+      for (var i = 0; i < e.changedTouches.length; i++) {
+        if (e.changedTouches[i].identifier === tid) {
+          tid = null; state.active = false; state.x = 0; state.y = 0; setKnob(0, 0);
+        }
+      }
+    }
+    el.addEventListener("touchend", end);
+    el.addEventListener("touchcancel", end);
+    function update(t) {
+      var c = center();
+      var dx = t.clientX - c.x;
+      var dy = t.clientY - c.y;
+      var len = Math.sqrt(dx * dx + dy * dy) || 1;
+      var clamped = Math.min(len, c.max);
+      dx = (dx / len) * clamped;
+      dy = (dy / len) * clamped;
+      setKnob(dx, dy);
+      state.x = dx / c.max;
+      state.y = dy / c.max;
+    }
+  }
+  bindJoy(document.getElementById("joyMove"), document.getElementById("knobMove"), moveJoy);
+  bindJoy(document.getElementById("joyLook"), document.getElementById("knobLook"), lookJoy);
+
+  // ── Minimap ────────────────────────────────────────────────────────
+  var mm = document.getElementById("mm");
+  var mmCtx = mm.getContext("2d");
+  var MM_W = 160, MM_H = 140;
+  var mmPad = 8;
+  function worldToMm(x, z) {
+    var sx = mmPad + ((x - BOUNDS.minX) / (BOUNDS.maxX - BOUNDS.minX)) * (MM_W - mmPad * 2);
+    var sy = mmPad + ((z - BOUNDS.minZ) / (BOUNDS.maxZ - BOUNDS.minZ)) * (MM_H - mmPad * 2);
+    return { x: sx, y: sy };
+  }
+  function drawMinimap() {
+    mmCtx.clearRect(0, 0, MM_W, MM_H);
+    mmCtx.fillStyle = "rgba(20,18,16,0.9)";
+    mmCtx.fillRect(0, 0, MM_W, MM_H);
+    // rooms
+    rooms.forEach(function (r) {
+      var a = worldToMm(r.minX, r.minZ);
+      var b = worldToMm(r.maxX, r.maxZ);
+      mmCtx.fillStyle = "rgba(122,158,146,0.25)";
+      mmCtx.fillRect(a.x, a.y, b.x - a.x, b.y - a.y);
+      mmCtx.strokeStyle = "rgba(243,239,232,0.2)";
+      mmCtx.lineWidth = 1;
+      mmCtx.strokeRect(a.x, a.y, b.x - a.x, b.y - a.y);
+    });
+    // player
+    var p = worldToMm(player.x, player.z);
+    mmCtx.save();
+    mmCtx.translate(p.x, p.y);
+    mmCtx.rotate(-player.yaw + Math.PI); // map: +z down, yaw 0 faces -z? our yaw 0 faces -Z conventionally... we use yaw 0 = -Z? Actually yaw 0 look along -Z in three after set.
+    // Our look: yaw rotates around Y; direction is (-sin(yaw), 0, -cos(yaw)) when pitch=0 from euler.
+    mmCtx.fillStyle = "#c4a574";
+    mmCtx.beginPath();
+    mmCtx.moveTo(0, -7);
+    mmCtx.lineTo(4, 5);
+    mmCtx.lineTo(-4, 5);
+    mmCtx.closePath();
+    mmCtx.fill();
+    mmCtx.restore();
+  }
+
+  // ── Resize ─────────────────────────────────────────────────────────
+  window.addEventListener("resize", function () {
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+  });
+
+  // ── Loop ───────────────────────────────────────────────────────────
+  var clock = new THREE.Clock();
+  var lastRoom = "";
+
+  function animate() {
+    requestAnimationFrame(animate);
+    var dt = Math.min(clock.getDelta(), 0.05);
+
+    // Look from mobile joystick
+    if (lookJoy.active) {
+      player.yaw -= lookJoy.x * 2.2 * dt;
+      player.pitch -= lookJoy.y * 1.6 * dt;
+      player.pitch = Math.max(-1.2, Math.min(1.2, player.pitch));
+    }
+
+    // Movement
+    var inputX = 0, inputZ = 0;
+    if (keys["KeyW"] || keys["ArrowUp"]) inputZ -= 1;
+    if (keys["KeyS"] || keys["ArrowDown"]) inputZ += 1;
+    if (keys["KeyA"] || keys["ArrowLeft"]) inputX -= 1;
+    if (keys["KeyD"] || keys["ArrowRight"]) inputX += 1;
+    if (moveJoy.active) {
+      inputX += moveJoy.x;
+      inputZ += moveJoy.y;
+    }
+    var len = Math.sqrt(inputX * inputX + inputZ * inputZ);
+    if (len > 1) { inputX /= len; inputZ /= len; }
+
+    if (len > 0.05) {
+      var speed = (keys["ShiftLeft"] || keys["ShiftRight"]) ? SPRINT : WALK;
+      var sin = Math.sin(player.yaw);
+      var cos = Math.cos(player.yaw);
+      // forward is -Z when yaw=0
+      var dx = (inputX * cos + inputZ * sin) * speed * dt;
+      var dz = (-inputX * sin + inputZ * cos) * speed * dt;
+      tryMove(dx, dz);
+    }
+
+    camera.position.set(player.x, player.y, player.z);
+    camera.rotation.order = "YXZ";
+    camera.rotation.y = player.yaw;
+    camera.rotation.x = player.pitch;
+
+    var room = currentRoom();
+    if (room !== lastRoom) {
+      lastRoom = room;
+      roomLabelEl.textContent = room;
+    }
+
+    drawMinimap();
+    renderer.render(scene, camera);
+  }
+  animate();
+})();
+</script>
+</body>
+</html>
