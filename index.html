@@ -140,10 +140,10 @@
   var WALL_H = 2.7;
   var DOOR_W = 0.9;
   var DOOR_H = 2.1;
-  var PLAYER_R = 0.28;
+  var PLAYER_R = 0.18;
   var EYE = 1.65;
-  var WALK = 2.8;
-  var SPRINT = 4.6;
+  var WALK = 3.2;
+  var SPRINT = 5.2;
 
   // Floor bounds (XZ)
   var BOUNDS = { minX: 0, maxX: 8.6, minZ: 0, maxZ: 6.4 };
@@ -232,10 +232,11 @@
   scene.fog = new THREE.Fog(0xb8c4c0, 8, 22);
 
   var camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.05, 50);
-  // Start at entrance (east), looking west into apartment
+  camera.rotation.order = "YXZ";
+  // Start in clear hall, looking west into apartment
   var player = {
-    x: 7.9, y: EYE, z: 5.6,
-    yaw: Math.PI,   // facing -X (into apartment)
+    x: 6.6, y: EYE, z: 5.55,
+    yaw: -Math.PI / 2,   // facing -X (into apartment): forward = (sin(yaw),0,-cos(yaw))
     pitch: 0
   };
   camera.position.set(player.x, player.y, player.z);
@@ -386,11 +387,11 @@
 
   // ── Furniture ──────────────────────────────────────────────────────
 
-  // Entrance shoe rack (east, near door)
-  box(0.35, 0.55, 1.0, matWood, 8.2, 0.275, 5.55);
-  box(0.32, 0.02, 0.96, matWoodDark, 8.2, 0.18, 5.55);
-  box(0.32, 0.02, 0.96, matWoodDark, 8.2, 0.38, 5.55);
-  furnBox(8.2, 5.55, 0.4, 1.05);
+  // Entrance shoe rack (east, south of door path — clear entrance walkway)
+  box(0.35, 0.55, 0.7, matWood, 8.15, 0.275, 6.15);
+  box(0.32, 0.02, 0.66, matWoodDark, 8.15, 0.18, 6.15);
+  box(0.32, 0.02, 0.66, matWoodDark, 8.15, 0.38, 6.15);
+  furnBox(8.15, 6.15, 0.36, 0.72);
   // Coat hooks strip
   box(0.04, 0.08, 0.6, matMetal, 8.45, 1.5, 4.7);
 
@@ -603,6 +604,14 @@
   function tryMove(dx, dz) {
     var nx = player.x + dx;
     var nz = player.z + dz;
+    // If already inside a collider, allow escape steps
+    if (collides(player.x, player.z)) {
+      if (!collides(nx, nz)) { player.x = nx; player.z = nz; return; }
+      if (!collides(player.x + dx, player.z)) { player.x += dx; return; }
+      if (!collides(player.x, player.z + dz)) { player.z += dz; return; }
+      player.x = nx; player.z = nz;
+      return;
+    }
     if (!collides(nx, nz)) {
       player.x = nx; player.z = nz;
       return;
@@ -623,9 +632,11 @@
   // ── Input ──────────────────────────────────────────────────────────
   var keys = {};
   var pointerLocked = false;
-  var isMobile = ("ontouchstart" in window) || navigator.maxTouchPoints > 0;
+  var playing = false;
+  var isTouchUI = window.matchMedia("(pointer: coarse)").matches;
   var moveJoy = { x: 0, y: 0, active: false };
   var lookJoy = { x: 0, y: 0, active: false };
+  var dragLook = { active: false, lastX: 0, lastY: 0 };
 
   var overlay = document.getElementById("overlay");
   var startBtn = document.getElementById("startBtn");
@@ -636,7 +647,8 @@
   startBtn.addEventListener("click", function () {
     overlay.classList.add("hidden");
     hud.classList.add("active");
-    if (isMobile) {
+    playing = true;
+    if (isTouchUI) {
       joysticks.classList.add("visible");
     } else {
       canvas.requestPointerLock();
@@ -648,22 +660,55 @@
   });
 
   canvas.addEventListener("click", function () {
-    if (!overlay.classList.contains("hidden") || isMobile) return;
+    if (!playing || isTouchUI) return;
     if (!pointerLocked) canvas.requestPointerLock();
   });
 
   document.addEventListener("mousemove", function (e) {
-    if (!pointerLocked) return;
-    player.yaw -= e.movementX * 0.0022;
-    player.pitch -= e.movementY * 0.0022;
-    player.pitch = Math.max(-1.2, Math.min(1.2, player.pitch));
+    if (!playing) return;
+    if (pointerLocked) {
+      player.yaw -= e.movementX * 0.0022;
+      player.pitch -= e.movementY * 0.0022;
+      player.pitch = Math.max(-1.2, Math.min(1.2, player.pitch));
+      return;
+    }
+    if (dragLook.active) {
+      player.yaw -= (e.clientX - dragLook.lastX) * 0.0022;
+      player.pitch -= (e.clientY - dragLook.lastY) * 0.0022;
+      player.pitch = Math.max(-1.2, Math.min(1.2, player.pitch));
+      dragLook.lastX = e.clientX;
+      dragLook.lastY = e.clientY;
+    }
   });
 
+  // Drag-to-look fallback when pointer lock is unavailable
+  canvas.addEventListener("mousedown", function (e) {
+    if (!playing || isTouchUI || pointerLocked) return;
+    if (e.button !== 0) return;
+    dragLook.active = true;
+    dragLook.lastX = e.clientX;
+    dragLook.lastY = e.clientY;
+  });
+  document.addEventListener("mouseup", function () {
+    dragLook.active = false;
+  });
+
+  var moveKeys = {
+    KeyW: 1, KeyA: 1, KeyS: 1, KeyD: 1,
+    ArrowUp: 1, ArrowDown: 1, ArrowLeft: 1, ArrowRight: 1
+  };
+
   document.addEventListener("keydown", function (e) {
+    if (!playing) return;
     keys[e.code] = true;
+    if (moveKeys[e.code]) e.preventDefault();
     if (e.code === "Escape" && pointerLocked) document.exitPointerLock();
   });
-  document.addEventListener("keyup", function (e) { keys[e.code] = false; });
+  document.addEventListener("keyup", function (e) {
+    if (!playing) return;
+    keys[e.code] = false;
+    if (moveKeys[e.code]) e.preventDefault();
+  });
 
   // Touch joysticks
   function bindJoy(el, knob, state) {
@@ -767,38 +812,36 @@
     requestAnimationFrame(animate);
     var dt = Math.min(clock.getDelta(), 0.05);
 
-    // Look from mobile joystick
-    if (lookJoy.active) {
-      player.yaw -= lookJoy.x * 2.2 * dt;
-      player.pitch -= lookJoy.y * 1.6 * dt;
-      player.pitch = Math.max(-1.2, Math.min(1.2, player.pitch));
-    }
+    if (playing) {
+      // Look from mobile joystick
+      if (lookJoy.active) {
+        player.yaw -= lookJoy.x * 2.2 * dt;
+        player.pitch -= lookJoy.y * 1.6 * dt;
+        player.pitch = Math.max(-1.2, Math.min(1.2, player.pitch));
+      }
 
-    // Movement
-    var inputX = 0, inputZ = 0;
-    if (keys["KeyW"] || keys["ArrowUp"]) inputZ -= 1;
-    if (keys["KeyS"] || keys["ArrowDown"]) inputZ += 1;
-    if (keys["KeyA"] || keys["ArrowLeft"]) inputX -= 1;
-    if (keys["KeyD"] || keys["ArrowRight"]) inputX += 1;
-    if (moveJoy.active) {
-      inputX += moveJoy.x;
-      inputZ += moveJoy.y;
-    }
-    var len = Math.sqrt(inputX * inputX + inputZ * inputZ);
-    if (len > 1) { inputX /= len; inputZ /= len; }
+      // Camera-relative movement: forward = (sin(yaw), 0, -cos(yaw))
+      var forward = 0, strafe = 0;
+      if (keys["KeyW"] || keys["ArrowUp"]) forward += 1;
+      if (keys["KeyS"] || keys["ArrowDown"]) forward -= 1;
+      if (keys["KeyA"] || keys["ArrowLeft"]) strafe -= 1;
+      if (keys["KeyD"] || keys["ArrowRight"]) strafe += 1;
+      if (moveJoy.active) {
+        forward += -moveJoy.y;
+        strafe += moveJoy.x;
+      }
+      var len = Math.sqrt(forward * forward + strafe * strafe);
+      if (len > 1) { forward /= len; strafe /= len; }
 
-    if (len > 0.05) {
-      var speed = (keys["ShiftLeft"] || keys["ShiftRight"]) ? SPRINT : WALK;
-      var sin = Math.sin(player.yaw);
-      var cos = Math.cos(player.yaw);
-      // forward is -Z when yaw=0
-      var dx = (inputX * cos + inputZ * sin) * speed * dt;
-      var dz = (-inputX * sin + inputZ * cos) * speed * dt;
-      tryMove(dx, dz);
+      if (len > 0.05) {
+        var speed = (keys["ShiftLeft"] || keys["ShiftRight"]) ? SPRINT : WALK;
+        var fx = Math.sin(player.yaw), fz = -Math.cos(player.yaw);
+        var rx = Math.cos(player.yaw), rz = Math.sin(player.yaw);
+        tryMove((fx * forward + rx * strafe) * speed * dt, (fz * forward + rz * strafe) * speed * dt);
+      }
     }
 
     camera.position.set(player.x, player.y, player.z);
-    camera.rotation.order = "YXZ";
     camera.rotation.y = player.yaw;
     camera.rotation.x = player.pitch;
 
